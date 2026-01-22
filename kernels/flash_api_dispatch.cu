@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 
+#ifndef FLASHATTENTION_DISABLE_SM80
 extern "C" void run_mha_sm80(
     void *q_ptr,
     void *k_ptr,
@@ -140,6 +141,7 @@ extern "C" void run_mha_sm80_softcap(
     int pack_gqa,
     int64_t cu_stream
 );
+#endif
 
 extern "C" void run_mha_sm90(
     void *q_ptr,
@@ -501,6 +503,7 @@ extern "C" void run_mha(
         return;
     }
 
+#ifndef FLASHATTENTION_DISABLE_SM80
     if (use_softcap) {
         run_mha_sm80_softcap(
             q_ptr,
@@ -640,4 +643,73 @@ extern "C" void run_mha(
             cu_stream
         );
     }
+#else
+    (void)use_softcap;
+    (void)q_ptr;
+    (void)k_ptr;
+    (void)v_ptr;
+    (void)page_table_ptr;
+    (void)o_ptr;
+    (void)softmax_lse_ptr;
+    (void)cu_seqlens_q_ptr;
+    (void)cu_seqlens_k_ptr;
+    (void)seqused_q_ptr;
+    (void)seqused_k_ptr;
+    (void)leftpad_k_ptr;
+    (void)kv_batch_idx_ptr;
+    (void)q_descale_ptr;
+    (void)k_descale_ptr;
+    (void)v_descale_ptr;
+    (void)q_batch_stride;
+    (void)k_batch_stride;
+    (void)v_batch_stride;
+    (void)o_batch_stride;
+    (void)q_row_stride;
+    (void)k_row_stride;
+    (void)v_row_stride;
+    (void)o_row_stride;
+    (void)q_head_stride;
+    (void)k_head_stride;
+    (void)v_head_stride;
+    (void)o_head_stride;
+    (void)v_dim_stride;
+    (void)q_descale_batch_stride;
+    (void)q_descale_head_stride;
+    (void)k_descale_batch_stride;
+    (void)k_descale_head_stride;
+    (void)v_descale_batch_stride;
+    (void)v_descale_head_stride;
+    (void)b;
+    (void)b_k;
+    (void)h;
+    (void)h_k;
+    (void)d;
+    (void)dv;
+    (void)seqlen_q;
+    (void)seqlen_k;
+    (void)total_q;
+    (void)total_k;
+    (void)softmax_scale;
+    (void)is_bf16;
+    (void)is_e4m3;
+    (void)window_size_left;
+    (void)window_size_right;
+    (void)attention_chunk;
+    (void)page_size;
+    (void)page_table_batch_stride;
+    (void)num_pages;
+    (void)num_splits;
+    (void)softmax_lseaccum_ptr;
+    (void)oaccum_ptr;
+    (void)oaccum_split_stride;
+    (void)oaccum_batch_stride;
+    (void)oaccum_row_stride;
+    (void)oaccum_head_stride;
+    (void)lseaccum_split_stride;
+    (void)lseaccum_batch_stride;
+    (void)lseaccum_head_stride;
+    (void)softcap;
+    (void)pack_gqa;
+    (void)cu_stream;
+#endif
 }

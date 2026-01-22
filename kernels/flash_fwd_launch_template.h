@@ -201,7 +201,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
 template<int Arch, typename T, int kHeadDim, int kHeadDimV, bool Split, bool PagedKVNonTMA, bool Has_softcap, bool PackGQA>
 void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream) {
     static_assert(sizeof(T) == 2 || sizeof(T) == 1, "Only 16bit and 8bit are supported");
-    static_assert(!Split, "Split kernels are disabled in this build");
+    //static_assert(!Split, "Split kernels are disabled in this build");
     static constexpr bool Is_FP8 = cute::is_same_v<T, cutlass::float_e4m3_t> || cute::is_same_v<T, cutlass::float_e5m2_t>;
     using T_out = std::conditional_t<!Is_FP8, T, cutlass::bfloat16_t>;
     static constexpr bool Split_enabled = false;

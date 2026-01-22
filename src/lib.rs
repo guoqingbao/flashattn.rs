@@ -1062,6 +1062,7 @@ impl FlashAttnCache {
         is_bf16: bool,
         is_e4m3: bool,
     ) -> Result<(candle::CudaStorage, Shape)> {
+        use candle_core::cuda_backend::cudarc::driver::DevicePtr;
         let dev = q.device();
 
         // println!("q {:?}, k_cache {:?}, v_cache {:?}", q_l.shape(), k_cache_l.shape(), v_cache_l.shape());
@@ -1160,7 +1161,7 @@ impl FlashAttnCache {
 
             let (context_lens, context_lens_layout) = context_lens.storage_and_layout();
             let context_lens = match &*context_lens {
-                candle::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
                 _ => candle::bail!("context_lens must be a cuda tensor"),
             };
 
@@ -1244,11 +1245,11 @@ impl FlashAttnCache {
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size_og as u32,
                 /* dv */ head_size_v as u32,
-                /* softmax_scale*/ self.softmax_scale,
                 /* seqlen_q */ seqlen_q as u32,
                 /* seqlen_k */ seqlen_k as u32,
                 /* total_q */ (batch_size * seqlen_q) as u32,
                 /* total_k */ (batch_size * seqlen_k) as u32,
+                /* softmax_scale*/ self.softmax_scale,
                 /* is_bf16 */ is_bf16,
                 /* is_e4m3 */ is_e4m3,
                 /* window_size_left */ -1,

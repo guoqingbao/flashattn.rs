@@ -319,15 +319,12 @@ fn main() -> Result<()> {
                 .join("build")
                 .join("flashattn_build")
         }
-        Ok(build_dir) => {
-            let path = PathBuf::from(build_dir);
-            path.canonicalize().expect(&format!(
-                "Directory doesn't exists: {} (the current directory is {})",
-                &path.display(),
-                std::env::current_dir()?.display()
-            ))
-        }
+        Ok(build_dir) => PathBuf::from(build_dir),
     };
+    fs::create_dir_all(&build_dir).context("create flashattn build dir")?;
+    let build_dir = build_dir
+        .canonicalize()
+        .context("canonicalize flashattn build dir")?;
 
     let cutlass_dir_str = cutlass_dir.display();
     let include_root: &'static str = Box::leak(format!("-I{cutlass_dir_str}").into_boxed_str());
@@ -379,15 +376,20 @@ fn main() -> Result<()> {
 
     let max_threads = std::cmp::min(
         48,
-        std::thread::available_parallelism()
+        (std::thread::available_parallelism()
             .map(|v| v.get())
-            .unwrap_or(48),
+            .unwrap_or(48) as f32
+            * 0.5) as usize,
     );
     ThreadPoolBuilder::new()
         .num_threads(max_threads)
         .build_global()
         .context("initialize rayon thread pool")?;
 
+    println!(
+        "cargo:warning=Building with maximum {} threads",
+        max_threads
+    );
     let nvcc_threads = match std::env::var("NVCC_THREADS") {
         Ok(value) => {
             let parsed = value
@@ -440,7 +442,10 @@ fn main() -> Result<()> {
                 .arg("-fPIC");
 
             if let Some(threads) = nvcc_threads {
-                command.arg(format!("--threads={}", threads));
+                let input_str = input_path.to_string_lossy();
+                if input_str.contains("flash_api") {
+                    command.arg(format!("--threads={}", threads));
+                }
             }
 
             if flash_context_enabled {
@@ -454,6 +459,8 @@ fn main() -> Result<()> {
 
             if compute_cap < 90 {
                 command.arg("-DFLASHATTENTION_DISABLE_FP8");
+            } else {
+                command.arg("-DFLASHATTENTION_DISABLE_SM80");
             }
 
             if let Some(target) = target.as_ref() {
