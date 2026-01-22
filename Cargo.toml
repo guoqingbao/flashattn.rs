@@ -1,0 +1,24 @@
+[package]
+name = "flashattn_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Flash attention V3 for the candle ML framework."
+keywords = ["flash-attention", "rust", "candle"]
+categories = ["science"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+exclude = ["cutlass/docs/**", "cutlass/test/**", "cutlass/examples/**", "cutlass/tools/**", "cutlass/media/**"]
+
+[dependencies]
+candle-core = { git = "https://github.com/guoqingbao/candle.git", version = "0.8.3", rev = "f430958", features = ["cuda"] }
+half = { version = "2.3.1", features = ["num-traits"] }
+once_cell = "1.21.3"
+
+[build-dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+rayon = "1.10.0"
+which = "6"
+
+[features]
+flash-decoding = []
+flash-context = []
