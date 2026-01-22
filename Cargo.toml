@@ -22,4 +22,3 @@ which = "6"
 [features]
 flash-decoding = []
 flash-context = []
-no-split = []

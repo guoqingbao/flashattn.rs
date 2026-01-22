@@ -214,6 +214,11 @@ fn collect_kernel_files(
                 if is_packgqa {
                     continue;
                 }
+                let is_hdimdiff =
+                    file_name.contains("hdimdiff") || has_hdim_diff_pattern(file_name);
+                if is_hdimdiff {
+                    continue;
+                }
                 // Context builds include split kernels for 64/128.
             } else if !flash_decoding_enabled && is_split {
                 continue;
@@ -225,6 +230,38 @@ fn collect_kernel_files(
 
     kernel_files.sort();
     Ok(kernel_files)
+}
+
+fn has_hdim_diff_pattern(file_name: &str) -> bool {
+    let mut rest = file_name;
+    while let Some(pos) = rest.find("hdim") {
+        rest = &rest[pos + 4..];
+        let (first_digits, after_first) = take_digits(rest);
+        if first_digits.is_empty() {
+            continue;
+        }
+        let after_first = after_first.strip_prefix('_');
+        if after_first.is_none() {
+            continue;
+        }
+        let (second_digits, _) = take_digits(after_first.unwrap());
+        if !second_digits.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+fn take_digits(s: &str) -> (&str, &str) {
+    let mut end = 0;
+    for (idx, ch) in s.char_indices() {
+        if ch.is_ascii_digit() {
+            end = idx + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    s.split_at(end)
 }
 
 fn main() -> Result<()> {
@@ -254,7 +291,6 @@ fn main() -> Result<()> {
 
     let flash_decoding_enabled = std::env::var("CARGO_FEATURE_FLASH_DECODING").is_ok();
     let flash_context_enabled = std::env::var("CARGO_FEATURE_FLASH_CONTEXT").is_ok();
-    let no_split = std::env::var("CARGO_FEATURE_NO_SPLIT").is_ok();
 
     let kernel_files =
         collect_kernel_files(flash_decoding_enabled, flash_context_enabled, compute_cap)?;
@@ -352,6 +388,19 @@ fn main() -> Result<()> {
         .build_global()
         .context("initialize rayon thread pool")?;
 
+    let nvcc_threads = match std::env::var("NVCC_THREADS") {
+        Ok(value) => {
+            let parsed = value
+                .parse::<usize>()
+                .context("Failed to parse NVCC_THREADS")?;
+            if parsed == 0 {
+                bail!("NVCC_THREADS must be >= 1");
+            }
+            Some(parsed)
+        }
+        Err(_) => Some(2),
+    };
+
     let rebuilt_any = AtomicBool::new(false);
     let target = std::env::var("TARGET").ok();
     compile_jobs
@@ -390,15 +439,17 @@ fn main() -> Result<()> {
                 .arg("-Xcompiler")
                 .arg("-fPIC");
 
+            if let Some(threads) = nvcc_threads {
+                command.arg(format!("--threads={}", threads));
+            }
+
             if flash_context_enabled {
                 command
                     .arg("-DFLASHATTENTION_DISABLE_HDIM96")
                     .arg("-DFLASHATTENTION_DISABLE_HDIM192")
-                    .arg("-DFLASHATTENTION_DISABLE_HDIM256");
-            }
-
-            if no_split {
-                command.arg("-DFLASHATTENTION_DISABLE_SPLIT");
+                    .arg("-DFLASHATTENTION_DISABLE_HDIM256")
+                    .arg("-DFLASHATTENTION_DISABLE_HDIMDIFF64")
+                    .arg("-DFLASHATTENTION_DISABLE_HDIMDIFF192");
             }
 
             if compute_cap < 90 {

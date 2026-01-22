@@ -1,7 +1,8 @@
 mod ffi;
-
 use candle::cuda_backend::WrapErr;
 use candle::{CpuStorage, Layout, Result, Shape, Tensor};
+use candle_core as candle;
+use candle_core::backend::BackendStorage;
 use half::{bf16, f16};
 #[cfg(feature = "flash-decoding")]
 use once_cell::sync::Lazy;
@@ -32,6 +33,7 @@ impl FlashAttn {
         is_bf16: bool,
         is_e4m3: bool,
     ) -> Result<(candle::CudaStorage, Shape)> {
+        use candle_core::cuda_backend::cudarc::driver::DevicePtr;
         let dev = q.device();
 
         let q = q.as_cuda_slice::<T>()?;
@@ -197,11 +199,11 @@ impl FlashAttn {
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size_og as u32,
                 /* dv */ head_size_v as u32,
-                /* softmax_scale*/ self.softmax_scale,
                 /* seqlen_q */ seqlen_q as u32,
                 /* seqlen_k */ seqlen_k as u32,
                 /* total_q */ (b_sz * seqlen_q) as u32,
                 /* total_k */ (b_k * seqlen_k) as u32,
+                /* softmax_scale*/ self.softmax_scale,
                 /* is_bf16 */ is_bf16,
                 /* is_e4m3 */ is_e4m3,
                 /* window_size_left */ window_size_left,
@@ -402,6 +404,7 @@ impl FlashAttnVarLen {
         is_bf16: bool,
         is_e4m3: bool,
     ) -> Result<(candle::CudaStorage, Shape)> {
+        use candle_core::cuda_backend::cudarc::driver::DevicePtr;
         let dev = q.device();
 
         let (seqlens_q, seqlens_q_layout) = self.seqlens_q.storage_and_layout();
@@ -687,11 +690,11 @@ impl FlashAttnVarLen {
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size_og as u32,
                 /* dv */ head_size_v as u32,
-                /* softmax_scale*/ self.softmax_scale,
                 /* seqlen_q */ self.max_seqlen_q as u32,
                 /* seqlen_k */ self.max_seqlen_k as u32,
                 /* total_q */ total_q as u32,
                 /* total_k */ total_k as u32,
+                /* softmax_scale*/ self.softmax_scale,
                 /* is_bf16 */ is_bf16,
                 /* is_e4m3 */ is_e4m3,
                 /* window_size_left */ window_size_left,
