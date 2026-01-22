@@ -188,7 +188,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
         cutlass::launch_kernel_on_cluster(launch_params, kernel, kernel_params);
     } else {
         auto kernel = cutlass::device_kernel<AttnKernel>;
-        if (smem_size >= 48 * 1024) {
+        if (Arch <= 90 && smem_size >= 48 * 1024) {
             CHECK_CUDA(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
         }
         // kernel<<<grid_dims, block_dims, smem_size, stream>>>(kernel_params);
