@@ -68,7 +68,11 @@ impl FlashAttn {
         let (b_k, seqlen_k, num_heads_k, head_size_k) = k_l.shape().dims4()?;
         let (b_v, seqlen_kv, num_heads_kv, head_size_v) = v_l.shape().dims4()?;
         if b_k != b_sz {
-            candle::bail!("batch size mismatch q {:?} and k {:?}", q_l.shape(), k_l.shape())
+            candle::bail!(
+                "batch size mismatch q {:?} and k {:?}",
+                q_l.shape(),
+                k_l.shape()
+            )
         }
         if b_k != b_v || seqlen_k != seqlen_kv || num_heads_k != num_heads_kv {
             candle::bail!("shape mismatch k {:?} and v {:?}", k_l.shape(), v_l.shape())
@@ -97,9 +101,7 @@ impl FlashAttn {
                 && head_size_v <= 128)
                 || (head_size_og <= 64 && head_size_v <= 512);
             if !valid {
-                candle::bail!(
-                    "unsupported v head dim {head_size_v} for q head dim {head_size_og}"
-                )
+                candle::bail!("unsupported v head dim {head_size_v} for q head dim {head_size_og}")
             }
         }
         if head_size_v != head_size_og {
@@ -109,9 +111,7 @@ impl FlashAttn {
                 && head_size_v <= 128)
                 || (head_size_og <= 64 && head_size_v <= 512);
             if !valid {
-                candle::bail!(
-                    "unsupported v head dim {head_size_v} for q head dim {head_size_og}"
-                )
+                candle::bail!("unsupported v head dim {head_size_v} for q head dim {head_size_og}")
             }
         }
 
@@ -259,7 +259,9 @@ impl candle::CustomOp3 for FlashAttn {
     ) -> Result<(candle::CudaStorage, Shape)> {
         match q.dtype() {
             candle::DType::F16 => self.cuda_fwd_t::<f16, f16>(q, q_l, k, k_l, v, v_l, false, false),
-            candle::DType::BF16 => self.cuda_fwd_t::<bf16, bf16>(q, q_l, k, k_l, v, v_l, true, false),
+            candle::DType::BF16 => {
+                self.cuda_fwd_t::<bf16, bf16>(q, q_l, k, k_l, v, v_l, true, false)
+            }
             candle::DType::U8 => self.cuda_fwd_t::<u8, bf16>(q, q_l, k, k_l, v, v_l, true, true),
             dt => candle::bail!("flash-attn is only supported for f16/bf16/u8 ({dt:?})"),
         }
@@ -465,8 +467,11 @@ impl FlashAttnVarLen {
                 )
             }
             let (num_pages, page_block_size, num_heads_k, head_size_k) = k_l.shape().dims4()?;
-            let (v_num_pages, v_page_block_size, v_num_heads_k, head_size_v) = v_l.shape().dims4()?;
-            if (num_pages, page_block_size, num_heads_k) != (v_num_pages, v_page_block_size, v_num_heads_k) {
+            let (v_num_pages, v_page_block_size, v_num_heads_k, head_size_v) =
+                v_l.shape().dims4()?;
+            if (num_pages, page_block_size, num_heads_k)
+                != (v_num_pages, v_page_block_size, v_num_heads_k)
+            {
                 candle::bail!("shape mismatch k {:?} and v {:?}", k_l.shape(), v_l.shape())
             }
             if head_size_k != head_size_og {
@@ -537,9 +542,7 @@ impl FlashAttnVarLen {
                 && head_size_v <= 128)
                 || (head_size_og <= 64 && head_size_v <= 512);
             if !valid {
-                candle::bail!(
-                    "unsupported v head dim {head_size_v} for q head dim {head_size_og}"
-                )
+                candle::bail!("unsupported v head dim {head_size_v} for q head dim {head_size_og}")
             }
         }
 
@@ -554,28 +557,32 @@ impl FlashAttnVarLen {
 
         let batch_size = nseqlens_q - 1;
 
-        let (block_table_ptr, block_table_batch_stride, block_table_batch_size, _max_num_blocks_per_seq) =
-            if let Some(block_table) = &self.block_table {
-                let max_num_blocks_per_seq = block_table.dim(1)?;
-                let block_table_batch_size = block_table.dim(0)?;
-                let (block_table, block_table_layout) = block_table.storage_and_layout();
-                let block_table_batch_stride = block_table_layout.stride()[0];
-                let block_table = match &*block_table {
-                    candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-                    _ => candle::bail!("block_table must be a cuda tensor"),
-                };
-
-                let block_table = block_table.slice(block_table_layout.start_offset()..);
-
-                (
-                    *block_table.device_ptr() as *const core::ffi::c_void,
-                    block_table_batch_stride,
-                    block_table_batch_size,
-                    max_num_blocks_per_seq,
-                )
-            } else {
-                (std::ptr::null(), 0usize, 0usize, 0usize)
+        let (
+            block_table_ptr,
+            block_table_batch_stride,
+            block_table_batch_size,
+            _max_num_blocks_per_seq,
+        ) = if let Some(block_table) = &self.block_table {
+            let max_num_blocks_per_seq = block_table.dim(1)?;
+            let block_table_batch_size = block_table.dim(0)?;
+            let (block_table, block_table_layout) = block_table.storage_and_layout();
+            let block_table_batch_stride = block_table_layout.stride()[0];
+            let block_table = match &*block_table {
+                candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                _ => candle::bail!("block_table must be a cuda tensor"),
             };
+
+            let block_table = block_table.slice(block_table_layout.start_offset()..);
+
+            (
+                *block_table.device_ptr() as *const core::ffi::c_void,
+                block_table_batch_stride,
+                block_table_batch_size,
+                max_num_blocks_per_seq,
+            )
+        } else {
+            (std::ptr::null(), 0usize, 0usize, 0usize)
+        };
 
         // if window_size_left > self.max_seqlen_k or None => -1
         let mut window_size_left = self
@@ -670,7 +677,8 @@ impl FlashAttnVarLen {
                 /* v_descale_batch_stride */ 0,
                 /* v_descale_head_stride */ 0,
                 /* b */ batch_size as u32,
-                /* b_k */ if self.block_table.is_some() {
+                /* b_k */
+                if self.block_table.is_some() {
                     block_table_batch_size as u32
                 } else {
                     batch_size as u32
@@ -741,7 +749,9 @@ impl candle::CustomOp3 for FlashAttnVarLen {
     ) -> Result<(candle::CudaStorage, Shape)> {
         match q.dtype() {
             candle::DType::F16 => self.cuda_fwd_t::<f16, f16>(q, q_l, k, k_l, v, v_l, false, false),
-            candle::DType::BF16 => self.cuda_fwd_t::<bf16, bf16>(q, q_l, k, k_l, v, v_l, true, false),
+            candle::DType::BF16 => {
+                self.cuda_fwd_t::<bf16, bf16>(q, q_l, k, k_l, v, v_l, true, false)
+            }
             candle::DType::U8 => self.cuda_fwd_t::<u8, bf16>(q, q_l, k, k_l, v, v_l, true, true),
             dt => candle::bail!("flash-attn is only supported for f16/bf16/u8 ({dt:?})"),
         }
@@ -1089,7 +1099,11 @@ impl FlashAttnCache {
         let (num_blocks, block_size, num_heads_k, head_size_k) = k_cache_l.shape().dims4()?;
         let (v_num_blocks, v_block_size, v_num_heads_k, head_size_v) = v_cache_l.shape().dims4()?;
         if (num_blocks, block_size, num_heads_k) != (v_num_blocks, v_block_size, v_num_heads_k) {
-            candle::bail!("shape mismatch k_cache {:?} and v_cache {:?}", k_cache_l.shape(), v_cache_l.shape())
+            candle::bail!(
+                "shape mismatch k_cache {:?} and v_cache {:?}",
+                k_cache_l.shape(),
+                v_cache_l.shape()
+            )
         }
         if head_size_k != head_size_og {
             candle::bail!(
@@ -1110,29 +1124,33 @@ impl FlashAttnCache {
             candle::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
         }
 
-        let (block_table_ptr, block_table_batch_stride, block_table_batch_size, max_num_blocks_per_seq) =
-            if let Some(block_table) = &self.block_table {
-                // println!("block table: {:?}", block_table.to_device(&candle::Device::Cpu)?.to_vec2::<u32>()?);
-                let max_num_blocks_per_seq = block_table.dim(1)?;
-                let block_table_batch_size = block_table.dim(0)?;
-                let (block_table, block_table_layout) = block_table.storage_and_layout();
-                let block_table_batch_stride = block_table_layout.stride()[0];
-                let block_table = match &*block_table {
-                    candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-                    _ => candle::bail!("block_table must be a cuda tensor"),
-                };
-
-                let block_table = block_table.slice(block_table_layout.start_offset()..);
-
-                (
-                    *block_table.device_ptr() as *const core::ffi::c_void,
-                    block_table_batch_stride,
-                    block_table_batch_size,
-                    max_num_blocks_per_seq,
-                )
-            } else {
-                (std::ptr::null(), 0usize, 0usize, 0usize)
+        let (
+            block_table_ptr,
+            block_table_batch_stride,
+            block_table_batch_size,
+            max_num_blocks_per_seq,
+        ) = if let Some(block_table) = &self.block_table {
+            // println!("block table: {:?}", block_table.to_device(&candle::Device::Cpu)?.to_vec2::<u32>()?);
+            let max_num_blocks_per_seq = block_table.dim(1)?;
+            let block_table_batch_size = block_table.dim(0)?;
+            let (block_table, block_table_layout) = block_table.storage_and_layout();
+            let block_table_batch_stride = block_table_layout.stride()[0];
+            let block_table = match &*block_table {
+                candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                _ => candle::bail!("block_table must be a cuda tensor"),
             };
+
+            let block_table = block_table.slice(block_table_layout.start_offset()..);
+
+            (
+                *block_table.device_ptr() as *const core::ffi::c_void,
+                block_table_batch_stride,
+                block_table_batch_size,
+                max_num_blocks_per_seq,
+            )
+        } else {
+            (std::ptr::null(), 0usize, 0usize, 0usize)
+        };
 
         let context_lens_ptr = if let Some(context_lens) = &self.context_lens {
             // println!("context_lens: {:?}", context_lens.to_device(&candle::Device::Cpu)?.to_vec1::<u32>()?);
@@ -1213,7 +1231,8 @@ impl FlashAttnCache {
                 /* v_descale_batch_stride */ 0,
                 /* v_descale_head_stride */ 0,
                 /* b */ batch_size as u32,
-                /* b_k */ if block_table_ptr.is_null() {
+                /* b_k */
+                if block_table_ptr.is_null() {
                     batch_size as u32
                 } else {
                     block_table_batch_size as u32
@@ -1291,9 +1310,8 @@ impl candle::CustomOp3 for FlashAttnCache {
             candle::DType::BF16 => self.cuda_fwd_t::<bf16, bf16>(
                 q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, false,
             ),
-            candle::DType::U8 => self.cuda_fwd_t::<u8, bf16>(
-                q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, true,
-            ),
+            candle::DType::U8 => self
+                .cuda_fwd_t::<u8, bf16>(q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, true),
             dt => candle::bail!("flash-attn is only supported for f16/bf16/u8 ({dt:?})"),
         }
     }

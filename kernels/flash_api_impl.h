@@ -235,11 +235,25 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     #else
     constexpr bool Split = false;
     #endif
-        BOOL_SWITCH(params.page_table && !params.pagedkv_tma, PagedKVNonTMA, [&] {
-            PACKGQA_SWITCH(params.pack_gqa, PackGQA, [&] {
+        if (params.page_table && !params.pagedkv_tma) {
+            constexpr bool PagedKVNonTMA = true;
+            if (params.pack_gqa) {
+                constexpr bool PackGQA = true;
                 run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
-            });
-        });
+            } else {
+                constexpr bool PackGQA = false;
+                run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+            }
+        } else {
+            constexpr bool PagedKVNonTMA = false;
+            if (params.pack_gqa) {
+                constexpr bool PackGQA = true;
+                run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+            } else {
+                constexpr bool PackGQA = false;
+                run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+            }
+        }
     #ifndef FLASHATTENTION_DISABLE_SPLIT
     });
     #endif

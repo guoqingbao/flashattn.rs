@@ -189,7 +189,11 @@ fn collect_kernel_files(
     }
 
     let inst_dir = Path::new("kernels/instantiations");
-    let sm_filter = if compute_cap >= 90 { "_sm90.cu" } else { "_sm80.cu" };
+    let sm_filter = if compute_cap >= 90 {
+        "_sm90.cu"
+    } else {
+        "_sm80.cu"
+    };
     for entry in fs::read_dir(inst_dir).context("read kernels/instantiations")? {
         let entry = entry?;
         let path = entry.path();
@@ -231,7 +235,10 @@ fn main() -> Result<()> {
     if std::env::var("CUDA_INCLUDE_DIR").is_err() {
         if let Ok(cuda_home) = std::env::var("CUDA_HOME") {
             let cuda_include = PathBuf::from(cuda_home).join("include");
-            println!("cargo:rustc-env=CUDA_INCLUDE_DIR={}", cuda_include.display());
+            println!(
+                "cargo:rustc-env=CUDA_INCLUDE_DIR={}",
+                cuda_include.display()
+            );
         } else if Path::new("/usr/local/cuda/include").exists() {
             println!("cargo:rustc-env=CUDA_INCLUDE_DIR=/usr/local/cuda/include");
         }
@@ -247,8 +254,10 @@ fn main() -> Result<()> {
 
     let flash_decoding_enabled = std::env::var("CARGO_FEATURE_FLASH_DECODING").is_ok();
     let flash_context_enabled = std::env::var("CARGO_FEATURE_FLASH_CONTEXT").is_ok();
+    let no_split = std::env::var("CARGO_FEATURE_NO_SPLIT").is_ok();
 
-    let kernel_files = collect_kernel_files(flash_decoding_enabled, flash_context_enabled, compute_cap)?;
+    let kernel_files =
+        collect_kernel_files(flash_decoding_enabled, flash_context_enabled, compute_cap)?;
 
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in &kernel_files {
@@ -292,7 +301,10 @@ fn main() -> Result<()> {
         Box::leak(format!("-I{cutlass_dir_str}/tools/util/include").into_boxed_str());
     println!("cargo:warning=Cutlass local folder {}", include_root);
     println!("cargo:warning=Cutlass include folder {}", include_main);
-    println!("cargo:warning=Cutlass tools include folder {}", include_tools);
+    println!(
+        "cargo:warning=Cutlass tools include folder {}",
+        include_tools
+    );
 
     let obj_dir = build_dir.join("objects");
     fs::create_dir_all(&obj_dir).context("create object output dir")?;
@@ -308,9 +320,7 @@ fn main() -> Result<()> {
 
     for input in &kernel_files {
         let input_path = PathBuf::from(input);
-        let file_name = input_path
-            .file_name()
-            .context("kernel file without name")?;
+        let file_name = input_path.file_name().context("kernel file without name")?;
         let mut obj_path = obj_dir.join(file_name);
         obj_path.set_extension("o");
 
@@ -322,8 +332,8 @@ fn main() -> Result<()> {
             .metadata()
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let should_compile = !obj_path.exists()
-            || input_modified.duration_since(obj_modified).is_ok();
+        let should_compile =
+            !obj_path.exists() || input_modified.duration_since(obj_modified).is_ok();
 
         if should_compile {
             compile_jobs.push((input_path.clone(), obj_path.clone()));
@@ -344,74 +354,80 @@ fn main() -> Result<()> {
 
     let rebuilt_any = AtomicBool::new(false);
     let target = std::env::var("TARGET").ok();
-    compile_jobs.par_iter().try_for_each(|(input_path, obj_path)| -> Result<()> {
-        let mut command = Command::new(&nvcc_path);
-        let gpu_arch = if compute_cap == 90 {
-            "sm_90a".to_string()
-        } else {
-            format!("sm_{}", compute_cap)
-        };
-        command
-            .arg("-O3")
-            .arg("-std=c++17")
-            .arg(format!("--gpu-architecture={}", gpu_arch))
-            .arg("-c")
-            .arg("-o")
-            .arg(obj_path)
-            .arg("-U__CUDA_NO_HALF_OPERATORS__")
-            .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
-            .arg("-U__CUDA_NO_HALF2_OPERATORS__")
-            .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
-            .arg("-Ikernels")
-            .arg("-DUSE_CUTLASS")
-            .arg(include_root)
-            .arg(include_main)
-            .arg(include_tools)
-            .arg("--expt-relaxed-constexpr")
-            .arg("--expt-extended-lambda")
-            .arg("--use_fast_math")
-            .arg("-lineinfo")
-            .arg("-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED")
-            .arg("-DCUTLASS_ENABLE_GDC_FOR_SM90")
-            .arg("-Xfatbin")
-            .arg("-compress-all")
-            .arg("-Xcompiler")
-            .arg("-fPIC");
-
-        if flash_context_enabled {
+    compile_jobs
+        .par_iter()
+        .try_for_each(|(input_path, obj_path)| -> Result<()> {
+            let mut command = Command::new(&nvcc_path);
+            let gpu_arch = if compute_cap == 90 {
+                "sm_90a".to_string()
+            } else {
+                format!("sm_{}", compute_cap)
+            };
             command
-                .arg("-DFLASHATTENTION_DISABLE_HDIM96")
-                .arg("-DFLASHATTENTION_DISABLE_HDIM192")
-                .arg("-DFLASHATTENTION_DISABLE_HDIM256");
-        }
+                .arg("-O3")
+                .arg("-std=c++17")
+                .arg(format!("--gpu-architecture={}", gpu_arch))
+                .arg("-c")
+                .arg("-o")
+                .arg(obj_path)
+                .arg("-U__CUDA_NO_HALF_OPERATORS__")
+                .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
+                .arg("-U__CUDA_NO_HALF2_OPERATORS__")
+                .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+                .arg("-Ikernels")
+                .arg("-DUSE_CUTLASS")
+                .arg(include_root)
+                .arg(include_main)
+                .arg(include_tools)
+                .arg("--expt-relaxed-constexpr")
+                .arg("--expt-extended-lambda")
+                .arg("--use_fast_math")
+                .arg("-lineinfo")
+                .arg("-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED")
+                .arg("-DCUTLASS_ENABLE_GDC_FOR_SM90")
+                .arg("-Xfatbin")
+                .arg("-compress-all")
+                .arg("-Xcompiler")
+                .arg("-fPIC");
 
-        if compute_cap < 90 {
-            command.arg("-DFLASHATTENTION_DISABLE_FP8");
-        }
-
-        if let Some(target) = target.as_ref() {
-            if target.contains("msvc") {
-                command.arg("-D_USE_MATH_DEFINES");
+            if flash_context_enabled {
+                command
+                    .arg("-DFLASHATTENTION_DISABLE_HDIM96")
+                    .arg("-DFLASHATTENTION_DISABLE_HDIM192")
+                    .arg("-DFLASHATTENTION_DISABLE_HDIM256");
             }
-        }
 
-        command.arg(input_path);
+            if no_split {
+                command.arg("-DFLASHATTENTION_DISABLE_SPLIT");
+            }
 
-        let output = command
-            .output()
-            .with_context(|| format!("Failed to invoke nvcc for {input_path:?}"))?;
-        if !output.status.success() {
-            bail!(
-                "nvcc error:\nCommand: {:?}\nstdout:\n{}\nstderr:\n{}",
-                command,
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+            if compute_cap < 90 {
+                command.arg("-DFLASHATTENTION_DISABLE_FP8");
+            }
 
-        rebuilt_any.store(true, Ordering::Relaxed);
-        Ok(())
-    })?;
+            if let Some(target) = target.as_ref() {
+                if target.contains("msvc") {
+                    command.arg("-D_USE_MATH_DEFINES");
+                }
+            }
+
+            command.arg(input_path);
+
+            let output = command
+                .output()
+                .with_context(|| format!("Failed to invoke nvcc for {input_path:?}"))?;
+            if !output.status.success() {
+                bail!(
+                    "nvcc error:\nCommand: {:?}\nstdout:\n{}\nstderr:\n{}",
+                    command,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            rebuilt_any.store(true, Ordering::Relaxed);
+            Ok(())
+        })?;
 
     let out_is_stale = !out_file.exists()
         || rebuilt_any.load(Ordering::Relaxed)
