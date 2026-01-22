@@ -1,8 +1,8 @@
 [package]
-name = "flashattn_rs"
+name = "flashattn-rs"
 version = "0.1.0"
 edition = "2021"
-description = "Flash attention V3 for the candle ML framework."
+description = "Flash attention V2/V3 for huggingface candle ecosystem."
 keywords = ["flash-attention", "rust", "candle"]
 categories = ["science"]
 license = "MIT OR Apache-2.0"
