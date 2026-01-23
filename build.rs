@@ -168,7 +168,7 @@ fn fetch_cutlass(out_dir: &PathBuf, commit: &str) -> Result<PathBuf> {
 fn collect_kernel_files(
     flash_decoding_enabled: bool,
     flash_context_enabled: bool,
-    compute_cap: usize,
+    use_v3: usize,
 ) -> Result<Vec<String>> {
     let mut kernel_files = vec![
         "kernels/flash_api_dispatch.cu".to_string(),
@@ -176,7 +176,7 @@ fn collect_kernel_files(
         "kernels/flash_prepare_scheduler.cu".to_string(),
     ];
 
-    if compute_cap >= 90 {
+    if use_v3 {
         kernel_files.extend_from_slice(&[
             "kernels/flash_api_sm90.cu".to_string(),
             "kernels/flash_api_sm90_softcap.cu".to_string(),
@@ -189,11 +189,7 @@ fn collect_kernel_files(
     }
 
     let inst_dir = Path::new("kernels/instantiations");
-    let sm_filter = if compute_cap >= 90 {
-        "_sm90.cu"
-    } else {
-        "_sm80.cu"
-    };
+    let sm_filter = if use_v3 { "_sm90.cu" } else { "_sm80.cu" };
     for entry in fs::read_dir(inst_dir).context("read kernels/instantiations")? {
         let entry = entry?;
         let path = entry.path();
@@ -280,20 +276,26 @@ fn main() -> Result<()> {
             println!("cargo:rustc-env=CUDA_INCLUDE_DIR=/usr/local/cuda/include");
         }
     }
-    let mut compute_cap = compute_cap().unwrap_or(90);
-    if compute_cap > 90 {
-        println!(
-            "cargo:warning=Detected CUDA compute capability {} (> 90). Clamping to sm_90 for flash-attention build.",
-            compute_cap
-        );
-        compute_cap = 90;
-    }
+    let compute_cap = compute_cap().unwrap_or(90);
 
     let flash_decoding_enabled = std::env::var("CARGO_FEATURE_FLASH_DECODING").is_ok();
     let flash_context_enabled = std::env::var("CARGO_FEATURE_FLASH_CONTEXT").is_ok();
+    let disable_fp8 = compute_cap < 90; // no hardware fp8 for sm_70, sm_80
+    let disable_flash_v2 = compute_cap >= 90 && compute_cap <= 100;
+    let disable_flash_v3 = compute_cap < 90 || compute_cap >= 120; // v3 has poor compatibility with Blackwell
 
-    let kernel_files =
-        collect_kernel_files(flash_decoding_enabled, flash_context_enabled, compute_cap)?;
+    if disable_flash_v2 && disable_flash_v3 {
+        panic!(
+            "No flash attention kernels suitable for this arch {}",
+            gpu_arch
+        );
+    }
+
+    let kernel_files = collect_kernel_files(
+        flash_decoding_enabled,
+        flash_context_enabled,
+        disable_flash_v2,
+    )?;
 
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in &kernel_files {
@@ -409,7 +411,13 @@ fn main() -> Result<()> {
         .par_iter()
         .try_for_each(|(input_path, obj_path)| -> Result<()> {
             let mut command = Command::new(&nvcc_path);
-            let gpu_arch = if compute_cap == 90 {
+            let gpu_arch = if compute_cap >= 121 {
+                "sm_121a".to_string()
+            } else if compute_cap >= 120 {
+                "sm_120a".to_string()
+            } else if compute_cap >= 100 {
+                "sm_100a".to_string()
+            } else if compute_cap == 90 {
                 "sm_90a".to_string()
             } else {
                 format!("sm_{}", compute_cap)
@@ -457,13 +465,15 @@ fn main() -> Result<()> {
                     .arg("-DFLASHATTENTION_DISABLE_HDIMDIFF192");
             }
 
-            if compute_cap < 90 {
+            if disable_fp8 {
                 command.arg("-DFLASHATTENTION_DISABLE_FP8");
-                command.arg("-DFLASHATTENTION_DISABLE_SM90");
-            } else {
+            }
+            if disable_flash_v2 {
                 command.arg("-DFLASHATTENTION_DISABLE_SM80");
             }
-
+            if disable_flash_v3 {
+                command.arg("-DFLASHATTENTION_DISABLE_SM90");
+            }
             if let Some(target) = target.as_ref() {
                 if target.contains("msvc") {
                     command.arg("-D_USE_MATH_DEFINES");

@@ -363,7 +363,7 @@ extern "C" void run_mha(
     bool use_softcap = softcap > 0.0f;
 
 #ifndef FLASHATTENTION_DISABLE_SM90
-    if (arch >= 90) {
+    if (arch >= 90 && arch <= 100) {
         if (use_softcap) {
             run_mha_sm90_softcap(
                 q_ptr,
