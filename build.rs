@@ -412,10 +412,8 @@ fn main() -> Result<()> {
         .par_iter()
         .try_for_each(|(input_path, obj_path)| -> Result<()> {
             let mut command = Command::new(&nvcc_path);
-            let gpu_arch = if compute_cap >= 121 {
-                "sm_121a".to_string()
-            } else if compute_cap >= 120 {
-                "sm_120a".to_string()
+            let gpu_arch = if disable_flash_v3 {
+                "sm_80".to_string()
             } else if compute_cap >= 100 {
                 "sm_100a".to_string()
             } else if compute_cap == 90 {
