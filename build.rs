@@ -29,29 +29,33 @@ fn find_nvcc() -> Result<PathBuf> {
 }
 
 fn compute_cap() -> Result<usize> {
-    if let Ok(compute_cap_str) = std::env::var("CUDA_COMPUTE_CAP") {
-        let cc = compute_cap_str
-            .parse::<usize>()
-            .context("Failed to parse CUDA_COMPUTE_CAP")?;
-        Ok(cc)
-    } else {
-        let output = Command::new("nvidia-smi")
-            .args(["--query-gpu=compute_cap", "--format=csv"])
-            .output()
-            .context("Failed to run nvidia-smi. Make sure it's in PATH.")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut lines = stdout.lines();
-        if lines.next().unwrap_or("") != "compute_cap" {
-            return Err(anyhow!("Unexpected output from nvidia-smi: {stdout}"));
-        }
-        if let Some(cap_line) = lines.next() {
-            let cc_str = cap_line.trim().replace('.', "");
-            let cc = cc_str.parse::<usize>()?;
-            Ok(cc)
-        } else {
-            Err(anyhow!("nvidia-smi did not return a compute_cap line"))
-        }
+    let out = Command::new("nvidia-smi")
+        .args(["--query-gpu=compute_cap", "--format=csv"])
+        .output();
+
+    if let Ok(out) = out {
+        let output = String::from_utf8(out.stdout).context("nvidia-smi output was not utf8")?;
+        let line = output
+            .lines()
+            .nth(1)
+            .ok_or_else(|| anyhow!("unexpected nvidia-smi output:\n{output}"))?;
+        let cap = line
+            .trim()
+            .parse::<f32>()
+            .context("failed to parse compute_cap")?;
+        return Ok((cap * 10.0) as usize);
     }
+
+    if let Ok(var) = std::env::var("CUDA_COMPUTE_CAP") {
+        let v = var
+            .parse::<usize>()
+            .context("CUDA_COMPUTE_CAP must be an integer")?;
+        return Ok(if v >= 100 { v } else { v * 10 });
+    }
+    
+    Err(anyhow!(
+        "failed to run nvidia-smi; set CUDA_COMPUTE_CAP env var instead"
+    ))
 }
 
 fn cargo_git_checkouts_dir() -> Result<PathBuf> {
