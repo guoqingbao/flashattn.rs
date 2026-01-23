@@ -52,7 +52,7 @@ fn compute_cap() -> Result<usize> {
             .context("CUDA_COMPUTE_CAP must be an integer")?;
         return Ok(if v >= 100 { v } else { v * 10 });
     }
-    
+
     Err(anyhow!(
         "failed to run nvidia-smi; set CUDA_COMPUTE_CAP env var instead"
     ))
@@ -172,7 +172,7 @@ fn fetch_cutlass(out_dir: &PathBuf, commit: &str) -> Result<PathBuf> {
 fn collect_kernel_files(
     flash_decoding_enabled: bool,
     flash_context_enabled: bool,
-    use_v3: usize,
+    use_v3: bool,
 ) -> Result<Vec<String>> {
     let mut kernel_files = vec![
         "kernels/flash_api_dispatch.cu".to_string(),
@@ -291,15 +291,12 @@ fn main() -> Result<()> {
     if disable_flash_v2 && disable_flash_v3 {
         panic!(
             "No flash attention kernels suitable for this arch {}",
-            gpu_arch
+            compute_cap
         );
     }
+    let use_v3 = !disable_flash_v3;
 
-    let kernel_files = collect_kernel_files(
-        flash_decoding_enabled,
-        flash_context_enabled,
-        disable_flash_v2,
-    )?;
+    let kernel_files = collect_kernel_files(flash_decoding_enabled, flash_context_enabled, use_v3)?;
 
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in &kernel_files {
