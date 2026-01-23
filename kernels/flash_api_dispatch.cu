@@ -143,6 +143,7 @@ extern "C" void run_mha_sm80_softcap(
 );
 #endif
 
+#ifndef FLASHATTENTION_DISABLE_SM90
 extern "C" void run_mha_sm90(
     void *q_ptr,
     void *k_ptr,
@@ -280,6 +281,7 @@ extern "C" void run_mha_sm90_softcap(
     int pack_gqa,
     int64_t cu_stream
 );
+#endif
 
 extern "C" void run_mha(
     void *q_ptr,
@@ -360,6 +362,7 @@ extern "C" void run_mha(
     int arch = prop.major * 10 + prop.minor;
     bool use_softcap = softcap > 0.0f;
 
+#ifndef FLASHATTENTION_DISABLE_SM90
     if (arch >= 90) {
         if (use_softcap) {
             run_mha_sm90_softcap(
@@ -502,6 +505,7 @@ extern "C" void run_mha(
         }
         return;
     }
+#endif
 
 #ifndef FLASHATTENTION_DISABLE_SM80
     if (use_softcap) {

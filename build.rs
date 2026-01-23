@@ -459,6 +459,7 @@ fn main() -> Result<()> {
 
             if compute_cap < 90 {
                 command.arg("-DFLASHATTENTION_DISABLE_FP8");
+                command.arg("-DFLASHATTENTION_DISABLE_SM90");
             } else {
                 command.arg("-DFLASHATTENTION_DISABLE_SM80");
             }
