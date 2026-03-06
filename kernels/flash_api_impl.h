@@ -17,8 +17,6 @@
 #include "tile_size.h"
 #include "heuristics.h"
 #include "cuda_check.h"
-#include "flash_fwd_launch_template.h"
-#include "flash_fwd_combine_launch_template.h"
 
 #define PREPARE_VARLEN_MAX_BATCHES_1CTA 992
 
@@ -235,23 +233,36 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     #else
     constexpr bool Split = false;
     #endif
-        if (params.page_table && !params.pagedkv_tma) {
-            constexpr bool PagedKVNonTMA = true;
-            if (params.pack_gqa) {
-                constexpr bool PackGQA = true;
+        // The generated instantiations only provide PackGQA=false for the plain
+        // non-paged, non-split path. Paged KV and split-KV always use PackGQA=true.
+        if constexpr (Split) {
+            constexpr bool PackGQA = true;
+            if (params.page_table && !params.pagedkv_tma) {
+                constexpr bool PagedKVNonTMA = true;
                 run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
             } else {
-                constexpr bool PackGQA = false;
+                constexpr bool PagedKVNonTMA = false;
                 run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
             }
         } else {
-            constexpr bool PagedKVNonTMA = false;
-            if (params.pack_gqa) {
+            if (params.page_table) {
                 constexpr bool PackGQA = true;
-                run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                if (params.pagedkv_tma) {
+                    constexpr bool PagedKVNonTMA = false;
+                    run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                } else {
+                    constexpr bool PagedKVNonTMA = true;
+                    run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                }
             } else {
-                constexpr bool PackGQA = false;
-                run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                constexpr bool PagedKVNonTMA = false;
+                if (params.pack_gqa) {
+                    constexpr bool PackGQA = true;
+                    run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                } else {
+                    constexpr bool PackGQA = false;
+                    run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                }
             }
         }
     #ifndef FLASHATTENTION_DISABLE_SPLIT
@@ -474,7 +485,8 @@ void run_mha_impl(
     params.num_splits_dynamic_ptr = use_prepare_varlen ? reinterpret_cast<int *>(1) : nullptr;
     params.pagedkv_tma = get_pagedkv_tma(params);
     params.num_splits = num_splits <= 0 ? get_num_splits(params) : num_splits;
-    params.pack_gqa = pack_gqa < 0 ? get_pack_gqa(params) : (pack_gqa != 0);
+    bool force_pack_gqa = params.arch < 90 || (params.page_table && !params.pagedkv_tma) || params.num_splits > 1;
+    params.pack_gqa = force_pack_gqa || (pack_gqa < 0 ? get_pack_gqa(params) : (pack_gqa != 0));
 
     if (params.num_splits > 1 && (!params.oaccum_ptr || !params.softmax_lseaccum_ptr)) {
         FA_CHECK(false, "num_splits > 1 requires oaccum and softmax_lseaccum buffers");
