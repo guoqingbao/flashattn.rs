@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-candle-core = { git = "https://github.com/guoqingbao/candle.git", version = "0.8.3", rev = "1e9d1a9", features = ["cuda"] }
+candle-core = { git = "https://github.com/guoqingbao/candle.git", version = "0.8.3", rev = "157b048", features = ["cuda"] }
 half = { version = "2.3.1", features = ["num-traits"] }
 once_cell = "1.21.3"
 
