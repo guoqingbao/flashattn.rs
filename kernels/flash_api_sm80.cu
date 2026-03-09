@@ -68,7 +68,7 @@ extern "C" void run_mha_sm80(
     int pack_gqa,
     int64_t cu_stream
 ) {
-    flash_api::run_mha_impl<80, false>(
+    flash_api::run_mha_impl<80>(
         q_ptr,
         k_ptr,
         v_ptr,

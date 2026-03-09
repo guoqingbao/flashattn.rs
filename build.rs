@@ -19,12 +19,9 @@ fn collect_kernel_files(
     ];
 
     if use_v3 {
-        kernel_files.push("kernels/flash_api_sm90.cu".to_string());
+        kernel_files.extend_from_slice(&["kernels/flash_api_sm90.cu".to_string()]);
     } else {
-        kernel_files.extend_from_slice(&[
-            "kernels/flash_api_sm80.cu".to_string(),
-            "kernels/flash_api_sm80_softcap.cu".to_string(),
-        ]);
+        kernel_files.extend_from_slice(&["kernels/flash_api_sm80.cu".to_string()]);
     }
 
     let inst_dir = Path::new("kernels/instantiations");
@@ -45,8 +42,14 @@ fn collect_kernel_files(
         let is_hdim64 = file_name.contains("hdim64");
         let is_hdim128 = file_name.contains("hdim128");
         let is_hdim256 = file_name.contains("hdim256");
+        let is_hdim512 = file_name.contains("_512_");
+        let is_fp8 = file_name.contains("_e4m3_");
+
         if flash_context_enabled {
             if !(is_hdim64 || is_hdim128 || is_hdim256) {
+                continue;
+            }
+            if is_fp8 || is_hdim512 {
                 continue;
             }
         } else if !flash_decoding_enabled && is_split {
@@ -122,7 +125,8 @@ fn main() -> Result<()> {
     let compute_cap = detect_build_compute_cap();
     let flash_decoding_enabled = std::env::var("CARGO_FEATURE_FLASH_DECODING").is_ok();
     let flash_context_enabled = std::env::var("CARGO_FEATURE_FLASH_CONTEXT").is_ok();
-    let disable_fp8 = compute_cap < 90;
+    let disable_fp8 = compute_cap < 90 || flash_context_enabled;
+    let disable_hdim512 = flash_context_enabled;
     let disable_flash_v2 = (90..=100).contains(&compute_cap);
     let disable_flash_v3 = compute_cap < 90 || compute_cap >= 120;
 
@@ -184,6 +188,9 @@ fn main() -> Result<()> {
     }
     if disable_fp8 {
         builder = builder.arg("-DFLASHATTENTION_DISABLE_FP8");
+    }
+    if disable_hdim512 {
+        builder = builder.arg("-DFLASHATTENTION_DISABLE_HDIM512");
     }
     if disable_flash_v2 {
         builder = builder.arg("-DFLASHATTENTION_DISABLE_SM80");

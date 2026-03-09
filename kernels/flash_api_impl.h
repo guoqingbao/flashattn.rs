@@ -128,9 +128,12 @@ void run_mha_fwd_constexpr(Flash_fwd_params &params, cudaStream_t stream) {
             if (params.d <= 64) {
                 #ifndef FLASHATTENTION_DISABLE_HDIMDIFF64
                 if constexpr (Arch == 90) {
+                    #ifndef FLASHATTENTION_DISABLE_HDIM512
                     if (params.dv > 256) {
                         return run_mha_fwd_<Arch, cutlass::bfloat16_t, 64, 512, Split, PagedKVNonTMA, Has_softcap, PackGQA>(params, stream);
-                    } else if (params.dv > 64) {
+                    } else
+                    #endif
+                    if (params.dv > 64) {
                         return run_mha_fwd_<Arch, cutlass::bfloat16_t, 64, 256, Split, PagedKVNonTMA, Has_softcap, PackGQA>(params, stream);
                     }
                 }
@@ -165,9 +168,12 @@ void run_mha_fwd_constexpr(Flash_fwd_params &params, cudaStream_t stream) {
             if (params.d <= 64) {
                 #ifndef FLASHATTENTION_DISABLE_HDIMDIFF64
                 if constexpr (Arch == 90) {
+                    #ifndef FLASHATTENTION_DISABLE_HDIM512
                     if (params.dv > 256) {
                         return run_mha_fwd_<Arch, cutlass::half_t, 64, 512, Split, PagedKVNonTMA, Has_softcap, PackGQA>(params, stream);
-                    } else if (params.dv > 64) {
+                    } else
+                    #endif
+                    if (params.dv > 64) {
                         return run_mha_fwd_<Arch, cutlass::half_t, 64, 256, Split, PagedKVNonTMA, Has_softcap, PackGQA>(params, stream);
                     }
                 }
@@ -300,7 +306,7 @@ inline void run_mha_fwd_combine(Flash_fwd_params &params, cudaStream_t stream, b
 
 #define FA_CHECK(cond, msg) do { if (!(cond)) { fprintf(stderr, "flashattn: %s\n", msg); return; } } while (0)
 
-template <int Arch, bool Has_softcap>
+template <int Arch>
 void run_mha_impl(
     void *q_ptr,
     void *k_ptr,
@@ -423,6 +429,17 @@ void run_mha_impl(
     params.total_k = static_cast<int>(total_k);
     params.d = static_cast<int>(d);
     params.dv = static_cast<int>(dv);
+    params.is_bf16 = is_bf16 != 0;
+    params.is_fp32 = false;
+    params.is_e4m3 = is_e4m3 != 0;
+
+    #ifdef FLASHATTENTION_DISABLE_FP8
+    FA_CHECK(!params.is_e4m3, "FP8 kernels are disabled in this build");
+    #endif
+    #ifdef FLASHATTENTION_DISABLE_HDIM512
+    FA_CHECK(!(params.d <= 64 && params.dv > 256), "value head dimension > 256 for head dimension <= 64 is disabled in this build");
+    #endif
+
     params.d_rounded = round_up_headdim(params.d);
     params.dv_rounded = params.dv == params.d ? params.d_rounded : round_up_headdimv(params.dv);
     params.seqlen_q_rounded = round_multiple(params.seqlen_q, 128);
@@ -434,16 +451,13 @@ void run_mha_impl(
     params.vnew_ptr = nullptr;
     params.cu_seqlens_knew = nullptr;
 
+    bool has_softcap = softcap > 0.0f;
     params.scale_softmax = softmax_scale;
-    params.softcap = Has_softcap ? softcap : 0.0f;
+    params.softcap = has_softcap ? softcap : 0.0f;
 
     params.p_dropout = 1.0f;
     params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0f));
     params.rp_dropout = 1.0f;
-
-    params.is_bf16 = is_bf16 != 0;
-    params.is_fp32 = false;
-    params.is_e4m3 = is_e4m3 != 0;
 
     params.attention_chunk = attention_chunk;
     params.is_causal = window_size_left < 0 && window_size_right == 0 && attention_chunk == 0;
@@ -539,7 +553,11 @@ void run_mha_impl(
 
     if (params.total_q > 0 && (params.seqlen_k + params.total_knew) > 0 && params.h_k > 0) {
         cudaStream_t stream = reinterpret_cast<cudaStream_t>(cu_stream);
-        run_mha_fwd<Arch, Has_softcap>(params, stream);
+        if (has_softcap) {
+            run_mha_fwd<Arch, true>(params, stream);
+        } else {
+            run_mha_fwd<Arch, false>(params, stream);
+        }
         if (params.num_splits > 1 && params.oaccum_ptr && params.softmax_lseaccum_ptr) {
             run_mha_fwd_combine(params, stream, true /*enable_pdl*/);
         }
