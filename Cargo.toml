@@ -15,7 +15,7 @@ once_cell = "1.21.3"
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-cudaforge = "0.1.4"
+cudaforge = "0.1.5"
 
 [features]
 flash-decoding = []
