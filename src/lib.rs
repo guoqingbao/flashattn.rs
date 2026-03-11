@@ -1432,7 +1432,7 @@ pub fn flash_attn_varlen_full(
     q.apply_op3(k, v, op)
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 fn num_splits_heuristic(
     batch_nheads_mblocks: i32,
     num_sms: i32,
@@ -1479,7 +1479,7 @@ fn num_splits_heuristic(
     1
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 pub fn get_num_splits(
     batch_size: usize,
     num_heads: usize,
@@ -1511,11 +1511,11 @@ pub fn get_num_splits(
     num_splits as usize
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 // A global, thread-safe cache of SM count per device ID
 static SM_COUNT_CACHE: Lazy<Mutex<HashMap<i32, i32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 pub fn get_multiprocessor_count(device: &candle::CudaDevice) -> Result<i32> {
     use candle::cuda_backend::cudarc::driver::sys;
     let device_id = device.cu_device();
@@ -1544,7 +1544,7 @@ pub fn get_multiprocessor_count(device: &candle::CudaDevice) -> Result<i32> {
     Ok(value)
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 struct FlashAttnCache {
     pub softmax_scale: f32,
     pub block_table: Option<Tensor>,
@@ -1562,7 +1562,7 @@ struct FlashAttnCache {
     pub q_batch_stride: usize,
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 impl FlashAttnCache {
     fn cuda_fwd_t<
         T: candle::cuda_backend::CudaDType + candle::cuda_backend::cudarc::driver::DeviceRepr,
@@ -2012,7 +2012,7 @@ impl FlashAttnCache {
     }
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 impl candle::CustomOp3 for FlashAttnCache {
     fn name(&self) -> &'static str {
         "flash-attn-with-kvcache"
@@ -2070,7 +2070,7 @@ impl candle::CustomOp3 for FlashAttnCache {
 ///
 ///
 /// The resulting tensor has dimensions `(total_q, num_heads_q, head_size_v)`.
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 pub fn flash_attn_with_kvcache_full(
     q: &Tensor,
     k_cache: &Tensor,
@@ -2102,7 +2102,7 @@ pub fn flash_attn_with_kvcache_full(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 pub fn flash_attn_with_kvcache_advanced(
     q: &Tensor,
     k_cache: &Tensor,
@@ -2162,7 +2162,7 @@ pub fn flash_attn_with_kvcache_advanced(
     Ok(o)
 }
 
-#[cfg(feature = "flash-decoding")]
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
 pub fn flash_attn_with_kvcache(
     q: &Tensor,
     k_cache: &Tensor,
