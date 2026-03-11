@@ -262,7 +262,10 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                 }
             } else {
                 constexpr bool PagedKVNonTMA = false;
-                if (params.pack_gqa) {
+                if constexpr (Arch < 90) {
+                    constexpr bool PackGQA = true;
+                    run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
+                } else if (params.pack_gqa) {
                     constexpr bool PackGQA = true;
                     run_mha_fwd_constexpr<Arch, Split, PagedKVNonTMA, PackGQA, Has_softcap>(params, stream);
                 } else {
