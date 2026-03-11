@@ -149,7 +149,7 @@ fn main() -> Result<()> {
         .include_path("kernels")
         .with_cutlass(Some(CUTLASS_COMMIT))
         .thread_percentage(0.5)
-        .max_threads(32)
+        .max_threads(48)
         .args([
             "-DNDEBUG",
             "-O3",
