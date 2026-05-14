@@ -49,7 +49,8 @@ fn collect_kernel_files(
             if !(is_hdim64 || is_hdim128 || is_hdim256) {
                 continue;
             }
-            if is_fp8 || is_hdim512 {
+            if is_fp8 && !use_v3 {
+                // FP8 is only supported in V3
                 continue;
             }
         } else if !flash_decoding_enabled && is_split {
@@ -125,8 +126,7 @@ fn main() -> Result<()> {
     let compute_cap = detect_build_compute_cap();
     let flash_decoding_enabled = std::env::var("CARGO_FEATURE_FLASH_DECODING").is_ok();
     let flash_context_enabled = std::env::var("CARGO_FEATURE_FLASH_CONTEXT").is_ok();
-    let disable_fp8 = compute_cap < 90 || flash_context_enabled;
-    let disable_hdim512 = flash_context_enabled;
+    let disable_fp8 = compute_cap != 90;
     let disable_flash_v2 = (90..=100).contains(&compute_cap);
     let disable_flash_v3 = compute_cap < 90 || compute_cap >= 120;
 
@@ -188,9 +188,6 @@ fn main() -> Result<()> {
     }
     if disable_fp8 {
         builder = builder.arg("-DFLASHATTENTION_DISABLE_FP8");
-    }
-    if disable_hdim512 {
-        builder = builder.arg("-DFLASHATTENTION_DISABLE_HDIM512");
     }
     if disable_flash_v2 {
         builder = builder.arg("-DFLASHATTENTION_DISABLE_SM80");

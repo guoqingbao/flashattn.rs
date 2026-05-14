@@ -1560,6 +1560,25 @@ struct FlashAttnCache {
     pub pack_gqa: Option<bool>,
     pub seqlenq_ngroups_swapped: bool,
     pub q_batch_stride: usize,
+    pub q_descale: Option<Tensor>,
+    pub k_descale: Option<Tensor>,
+    pub v_descale: Option<Tensor>,
+    pub fp8_kv: bool,
+}
+
+#[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
+fn get_cuda_device_ptr(s: &candle::CudaStorage, l: &Layout) -> Result<*const core::ffi::c_void> {
+    use candle::cuda_backend::cudarc::driver::DevicePtr;
+    use candle::cuda_backend::CudaStorageSlice;
+    match &s.slice {
+        CudaStorageSlice::U8(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::U32(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::I64(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::BF16(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::F16(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::F32(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+        CudaStorageSlice::F64(s) => Ok(*s.slice(l.start_offset()..).device_ptr() as *const _),
+    }
 }
 
 #[cfg(any(feature = "flash-decoding", feature = "flash-context"))]
@@ -1581,13 +1600,23 @@ impl FlashAttnCache {
         use candle_core::cuda_backend::cudarc::driver::DevicePtr;
         let dev = q.device();
 
-        // println!("q {:?}, k_cache {:?}, v_cache {:?}", q_l.shape(), k_cache_l.shape(), v_cache_l.shape());
-        let q = q.as_cuda_slice::<T>()?;
-        let k_cache = k_cache.as_cuda_slice::<T>()?;
-        let v_cache = v_cache.as_cuda_slice::<T>()?;
-        let q = q.slice(q_l.start_offset()..);
-        let k_cache = k_cache.slice(k_cache_l.start_offset()..);
-        let v_cache = v_cache.slice(v_cache_l.start_offset()..);
+        let (q_ptr, k_cache_ptr, v_cache_ptr) = if self.fp8_kv {
+            (
+                get_cuda_device_ptr(q, q_l)?,
+                get_cuda_device_ptr(k_cache, k_cache_l)?,
+                get_cuda_device_ptr(v_cache, v_cache_l)?,
+            )
+        } else {
+            let q_s = q.as_cuda_slice::<T>()?;
+            let k_s = k_cache.as_cuda_slice::<T>()?;
+            let v_s = v_cache.as_cuda_slice::<T>()?;
+            (
+                *q_s.slice(q_l.start_offset()..).device_ptr() as *const core::ffi::c_void,
+                *k_s.slice(k_cache_l.start_offset()..).device_ptr() as *const core::ffi::c_void,
+                *v_s.slice(v_cache_l.start_offset()..).device_ptr() as *const core::ffi::c_void,
+            )
+        };
+        let is_e4m3 = is_e4m3 || self.fp8_kv;
 
         let q_stride = q_l.stride();
         let k_stride = k_cache_l.stride();
@@ -1882,10 +1911,85 @@ impl FlashAttnCache {
             None
         };
 
+        let (q_descale_ptr, q_descale_batch_stride, q_descale_head_stride) =
+            if let Some(qd) = &self.q_descale {
+                let (s, l) = qd.storage_and_layout();
+                let ptr = match &*s {
+                    candle::Storage::Cuda(c) => {
+                        let sl = c.as_cuda_slice::<f32>()?;
+                        *sl.slice(l.start_offset()..).device_ptr() as *const f32
+                    }
+                    _ => candle::bail!("q_descale must be a cuda f32 tensor"),
+                };
+                let strides = l.stride();
+                let batch_stride = if strides.len() > 1 {
+                    strides[0] as u32
+                } else {
+                    0
+                };
+                let head_stride = if strides.len() > 1 {
+                    strides[1] as u32
+                } else {
+                    strides[0] as u32
+                };
+                (ptr, batch_stride, head_stride)
+            } else {
+                (std::ptr::null(), 0u32, 0u32)
+            };
+
+        let (k_descale_ptr, k_descale_batch_stride, k_descale_head_stride) =
+            if let Some(kd) = &self.k_descale {
+                let (s, l) = kd.storage_and_layout();
+                let ptr = match &*s {
+                    candle::Storage::Cuda(c) => {
+                        let sl = c.as_cuda_slice::<f32>()?;
+                        *sl.slice(l.start_offset()..).device_ptr() as *const f32
+                    }
+                    _ => candle::bail!("k_descale must be a cuda f32 tensor"),
+                };
+                let strides = l.stride();
+                let batch_stride = if strides.len() > 1 {
+                    strides[0] as u32
+                } else {
+                    0
+                };
+                let head_stride = if strides.len() > 1 {
+                    strides[1] as u32
+                } else {
+                    strides[0] as u32
+                };
+                (ptr, batch_stride, head_stride)
+            } else {
+                (std::ptr::null(), 0u32, 0u32)
+            };
+
+        let (v_descale_ptr, v_descale_batch_stride, v_descale_head_stride) =
+            if let Some(vd) = &self.v_descale {
+                let (s, l) = vd.storage_and_layout();
+                let ptr = match &*s {
+                    candle::Storage::Cuda(c) => {
+                        let sl = c.as_cuda_slice::<f32>()?;
+                        *sl.slice(l.start_offset()..).device_ptr() as *const f32
+                    }
+                    _ => candle::bail!("v_descale must be a cuda f32 tensor"),
+                };
+                let strides = l.stride();
+                let batch_stride = if strides.len() > 1 {
+                    strides[0] as u32
+                } else {
+                    0
+                };
+                let head_stride = if strides.len() > 1 {
+                    strides[1] as u32
+                } else {
+                    strides[0] as u32
+                };
+                (ptr, batch_stride, head_stride)
+            } else {
+                (std::ptr::null(), 0u32, 0u32)
+            };
+
         unsafe {
-            let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
-            let k_cache_ptr = *k_cache.device_ptr() as *const core::ffi::c_void;
-            let v_cache_ptr = *v_cache.device_ptr() as *const core::ffi::c_void;
             let dst_ptr = *dst.device_ptr() as *mut core::ffi::c_void;
             let softmax_lse_ptr = *softmax_lse.device_ptr() as *mut core::ffi::c_void;
             let softmax_lseaccum_ptr = softmax_lseaccum
@@ -1909,9 +2013,9 @@ impl FlashAttnCache {
                 /* seqused_k_ptr */ context_lens_ptr,
                 /* leftpad_k_ptr */ std::ptr::null(),
                 /* kv_batch_idx_ptr */ std::ptr::null(),
-                /* q_descale_ptr */ std::ptr::null(),
-                /* k_descale_ptr */ std::ptr::null(),
-                /* v_descale_ptr */ std::ptr::null(),
+                /* q_descale_ptr */ q_descale_ptr,
+                /* k_descale_ptr */ k_descale_ptr,
+                /* v_descale_ptr */ v_descale_ptr,
                 /* q_batch_stride */ self.q_batch_stride as u32,
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
@@ -1925,12 +2029,12 @@ impl FlashAttnCache {
                 /* v_head_stride  */ v_stride[2] as u32,
                 /* o_head_stride  */ o_head_stride,
                 /* v_dim_stride */ v_stride[v_rank - 1] as u32,
-                /* q_descale_batch_stride */ 0,
-                /* q_descale_head_stride */ 0,
-                /* k_descale_batch_stride */ 0,
-                /* k_descale_head_stride */ 0,
-                /* v_descale_batch_stride */ 0,
-                /* v_descale_head_stride */ 0,
+                /* q_descale_batch_stride */ q_descale_batch_stride,
+                /* q_descale_head_stride */ q_descale_head_stride,
+                /* k_descale_batch_stride */ k_descale_batch_stride,
+                /* k_descale_head_stride */ k_descale_head_stride,
+                /* v_descale_batch_stride */ v_descale_batch_stride,
+                /* v_descale_head_stride */ v_descale_head_stride,
                 /* b */ batch_size as u32,
                 /* b_k */
                 if block_table_ptr.is_null() {
@@ -2039,16 +2143,16 @@ impl candle::CustomOp3 for FlashAttnCache {
         v_cache: &candle::CudaStorage,
         v_cache_l: &Layout,
     ) -> Result<(candle::CudaStorage, Shape)> {
-        match q.dtype() {
-            candle::DType::F16 => self.cuda_fwd_t::<f16, f16>(
+        match (q.dtype(), k_cache.dtype()) {
+            (candle::DType::U8, candle::DType::U8) => self
+                .cuda_fwd_t::<u8, bf16>(q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, true),
+            (candle::DType::F16, _) => self.cuda_fwd_t::<f16, f16>(
                 q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, false, false,
             ),
-            candle::DType::BF16 => self.cuda_fwd_t::<bf16, bf16>(
+            (candle::DType::BF16, _) => self.cuda_fwd_t::<bf16, bf16>(
                 q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, false,
             ),
-            candle::DType::U8 => self
-                .cuda_fwd_t::<u8, bf16>(q, q_l, k_cache, k_cache_l, v_cache, v_cache_l, true, true),
-            dt => candle::bail!("flash-attn is only supported for f16/bf16/u8 ({dt:?})"),
+            (dt, _) => candle::bail!("flash-attn is only supported for f16/bf16/u8 ({dt:?})"),
         }
     }
 }
@@ -2098,6 +2202,9 @@ pub fn flash_attn_with_kvcache_full(
         None,
         0,
         None,
+        None,
+        None,
+        None,
     )
 }
 
@@ -2119,7 +2226,11 @@ pub fn flash_attn_with_kvcache_advanced(
     softcap: Option<f32>,
     num_splits: i32,
     pack_gqa: Option<bool>,
+    q_descale: Option<&Tensor>,
+    k_descale: Option<&Tensor>,
+    v_descale: Option<&Tensor>,
 ) -> Result<Tensor> {
+    let fp8_kv = k_cache.dtype() == candle::DType::U8;
     let mut q_batch_stride = q.stride()[0];
     let seqlenq_ngroups_swapped = false;
     let q = if q.rank() == 4 && seqlenq_ngroups_swapped {
@@ -2149,6 +2260,10 @@ pub fn flash_attn_with_kvcache_advanced(
         block_table: Some(block_table.to_owned()),
         seqlenq_ngroups_swapped,
         q_batch_stride,
+        q_descale: q_descale.cloned(),
+        k_descale: k_descale.cloned(),
+        v_descale: v_descale.cloned(),
+        fp8_kv,
     };
     let o = q.apply_op3(k_cache, v_cache, op)?;
     let o = if seqlenq_ngroups_swapped {
@@ -2186,6 +2301,9 @@ pub fn flash_attn_with_kvcache(
         None,
         None,
         0,
+        None,
+        None,
+        None,
         None,
     )
 }
